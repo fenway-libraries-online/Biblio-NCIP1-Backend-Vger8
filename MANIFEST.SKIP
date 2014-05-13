@@ -1,0 +1,9 @@
+^_build(/|$)
+^Build(/|$)
+^\.git(/|$)
+^\.gitignore$
+^MYMETA\.yml$
+^MYMETA\.json$
+\.bak$
+^old(/|$)
+^Biblio-.*\.gz$

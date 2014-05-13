@@ -1,0 +1,8 @@
+_build/
+Build
+Makefile
+*.old
+old
+MANIFEST.bak
+META.yml
+MYMETA.yml
