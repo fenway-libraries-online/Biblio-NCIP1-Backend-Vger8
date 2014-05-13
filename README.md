@@ -1,4 +1,5 @@
-Biblio-NCIP1
-============
+Biblio-NCIP1-Backend-Vger8
+==========================
 
-NCIP version 1 responder framework
+NCIP1 back-end for Voyager 8 ILS
+
