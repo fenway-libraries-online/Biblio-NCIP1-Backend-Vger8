@@ -27,7 +27,7 @@ my $sql_item_home_circ_location = q{
     FROM   circ_policy_locs cpl,
            location l
     WHERE  cpl.location_id = l.location_id
-    AND    circ_location = 'Y'
+    AND    cpl.circ_location = 'Y'
     AND    cpl.circ_group_id IN (
                 SELECT cpl.circ_group_id
                 FROM   circ_policy_locs cpl,
