@@ -242,15 +242,7 @@ sub LookupUser {
         }
     }
     # Validate the user using SIP
-    my %res;
-    my $sip = $self->{sip};
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
+    my $sip = $self->sip(patron => $barcode);
     return { user => $user };
 }
 
@@ -266,14 +258,7 @@ sub RequestItem {
     fail ERR_UNKNOWN_ITEM if !$bibitems || !%$bibitems;
     # We found something
     my %res;
-    my $sip = $self->{sip};
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($user_barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
+    my $sip = $self->sip(patron => $user_barcode);
     # Score each bibitem
     my @bibitems;
     foreach (values %$bibitems) {
@@ -331,16 +316,8 @@ sub CancelRequestItem {
     # We'll need the bib ID, too
     fail ERR_UNKNOWN_ITEM if !defined $bib_id;
     # Punt to SIP
-    my %res;
-    my $sip = $self->{sip};
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($user_barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
-    %res = $sip->cancel_hold($user_barcode, $bib_id, $item_barcode);
+    my $sip = $self->sip(patron => $user_barcode);
+    my %res = $sip->cancel_hold($user_barcode, $bib_id, $item_barcode);
     fail ERR_UNKNOWN_REQUEST if !$res{ok};  # XXX
     my %retval = (
         request => $request,
@@ -357,16 +334,8 @@ sub CheckOutItem {
     my $item = $self->find_item(%{ $req->{item} || fail ERR_ELEMENT_RULE_VIOLATED }) || fail ERR_UNKNOWN_ITEM;
     my $patron_barcode = $user->{barcode} || fail ERR_ELEMENT_RULE_VIOLATED;
     my $item_barcode   = $item->{barcode} || fail ERR_ELEMENT_RULE_VIOLATED;
-    my $sip = $self->{sip};
-    my %res;
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($patron_barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
-    %res = $sip->checkout($patron_barcode, $item_barcode);
+    my $sip = $self->sip(patron => $patron_barcode);
+    my %res = $sip->checkout($patron_barcode, $item_barcode);
     fail ERR_USER_INELIGIBLE_TO_CHECK_OUT_THIS_ITEM if !$res{ok};
     return {
         user => $user,
@@ -400,11 +369,18 @@ sub AcceptItem {
     my $item_barcode = sprintf($item_barcode_template, $reqnum);
     my ($item_id) = $self->query1($sql_item_barcode_to_id, $item_barcode);
     fail ERR_DUPLICATE_ITEM if defined $item_id;
-    %res = $sip->create($item_barcode, $title, $reqnum);
+    # my $loc = $self->{config}{sip}{location};
+    my $sip = $self->sip;
+    # my $sip = $self->sip(location => $loc, patron => $patron_barcode);
+    my %res = $sip->create($item_barcode, $title, $reqnum);
     fail ERR_CANNOT_ACCEPT_ITEM if !$res{ok};
     ($item_id) = $self->query1($sql_item_barcode_to_id, $item_barcode);
     my $bib_id = $res{bib_id};
-    %res = $sip->hold($patron_barcode, $bib_id, $item_barcode);
+    my $loc = $self->item_home($item_barcode);
+    # XXX Hack -- Voyager 9-specific but shouldn't break in other versions
+    $sip->disconnect;
+    $sip = $self->sip(patron => $patron_barcode);
+    %res = $sip->hold($patron_barcode, $bib_id, $item_barcode, $loc);
     fail ERR_USER_INELIGIBLE_TO_REQUEST_THIS_ITEM if !$res{ok};
     return {
         item => {
@@ -421,14 +397,9 @@ sub CheckInItem {
     my ($self, $req) = @_;
     my $item = $self->find_item(%{$req->{item}});
     my $item_barcode = $item->{barcode} || fail ERR_ELEMENT_RULE_VIOLATED;
-    my ($loc) = $self->query1($sql_item_home_circ_location, $item_barcode);
-    my $sip = $self->{sip};
+    my $loc = $self->item_home($item_barcode);
     my %res;
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login(location => $loc);
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
+    my $sip = $self->sip(location => $loc);
     for (1..2) {
         %res = $sip->checkin($item_barcode);
         return { item => $item } if $res{ok};
@@ -442,16 +413,10 @@ sub RenewItem {
     fail ERR_ITEM_NOT_CHECKED_OUT_TO_THIS_USER if !$user;
     my $item = $self->find_item(%{$req->{item}});
     my $item_barcode   = $item->{barcode} || fail ERR_ELEMENT_RULE_VIOLATED;
+    my $loc = $self->item_home($item_barcode);
     my $patron_barcode = $user->{barcode} || fail ERR_ELEMENT_RULE_VIOLATED;
     my %res;
-    my $sip = $self->{sip};
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($patron_barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
+    my $sip = $self->sip(location => $loc, patron => $patron_barcode);
     %res = $sip->renew($patron_barcode, $item_barcode);
     fail ERR_ITEM_NOT_RENEWABLE if !$res{ok};
     return { item => $item };
@@ -628,6 +593,27 @@ sub request_file {
     return "$root/request/$id.$ext";
 }
 
+sub sip {
+    my ($self, %arg) = @_;
+    my %config = %{ $self->{config}{sip} };
+    my $sip = Biblio::SIP2::Vger8->new(%config, %arg);
+    $sip->connect || fail ERR_TEMPORARY_PROCESSING_FAILURE;
+    my %res = $sip->login;
+    fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
+    if (defined $arg{patron}) {
+        %res = $sip->patron_status($arg{patron});
+        fail ERR_UNKNOWN_USER if !$res{ok};
+    }
+    return $sip;
+}
+
+
+sub item_home {
+    my ($self, $item_barcode) = @_;
+    my $query_lib = $self->{query_lib};
+    my ($loc) = $self->query1($sql_item_home_circ_location, $item_barcode);
+    return $loc;
+}
 sub dbh {
     my ($self) = @_;
     return $dbh ||= Biblio::Vger::DBI->connect(
@@ -704,9 +690,13 @@ sub hook_request_cancelled {
     my $id = $data{id} ||= $data{request}{id};
     my $fr = $self->request_file($id);
     my $fx = $self->request_file($id, 'x');
-    rename $fr, $fx;
     $data{status} = 'cancelled';
-    $self->write_request($fx, %data);
+    if (rename $fr, $fx) {
+        $self->write_request($fx, %data);
+    }
+    else {
+        unlink $fr;
+    }
 }
 
 sub error($) {
