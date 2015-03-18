@@ -168,13 +168,12 @@ sub new {
         }
         delete $config->{'include'};
     }
-    $self->{'sip'} ||= Biblio::SIP2::Vger8->new(%{ $config->{sip} });
     return $self;
 }
 
 sub startup {
     my ($self) = @_;
-    my $config_file = $self->{'config_file'};
+    my $config_file = $self->{'config_file'} || '(undefined)';
     print STDERR "** backend config file: $config_file\n";
 }
 
@@ -325,15 +324,6 @@ sub AcceptItem {
     my $user   = $req->{user};
     $user = $self->find_user(%$user) || fail ERR_UNKNOWN_USER;
     my $patron_barcode = $user->{barcode} || fail ERR_UNKNOWN_USER;
-    my $sip = $self->{sip};
-    my %res;
-    if (!$sip->is_connected) {
-        $sip->connect;
-        %res = $sip->login;
-        fail ERR_TEMPORARY_PROCESSING_FAILURE if !$res{ok};
-    }
-    %res = $sip->patron_status($patron_barcode);
-    fail ERR_UNKNOWN_USER if !$res{ok};
     # Create the bib, MFHD, and item
     my $item_barcode_template = $self->{config}{voyager}{item_barcode_format};
     my $item_barcode = sprintf($item_barcode_template, $reqnum);
@@ -490,8 +480,9 @@ sub find_lendable_holdings_by_isbn {
 
 sub agency_to_location_limit_group {
     my ($self, $agency) = @_;
-    return 'VC' if !defined $agency;
-    return $self->{config}{libraries}{$library}{limit_group} || 'VC';
+    my $default = $self->{config}{voyager}{default_limit_group} || '<none>';
+    return $default if !defined $agency;
+    return $self->{config}{agencies}{$agency}{limit_group} || $default;
 }
 
 sub score_bibitem {
@@ -560,7 +551,7 @@ sub request_file {
     my ($self, $id, $ext) = @_;
     my $root = $self->{config}{files}{root};
     $ext = 'r' if !defined $ext;
-    return "$root/request/$id.$ext";
+    return $ext eq 'r' ? "$root/request/$id.$ext" : "$root/request/cancelled/$id.$ext";
 }
 
 sub sip {
