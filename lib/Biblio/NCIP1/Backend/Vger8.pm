@@ -13,7 +13,6 @@ use Biblio::NCIP1::Constants qw(:requests :errors);
 use Biblio::NCIP1::Config;
 use YAML qw(DumpFile LoadFile);
 
-use constant CREATE_USER_CMD => '/home/voyager/bin/vncip-create-user';
 use constant HOOK_HOLD_CREATED   => 'hold-created';
 use constant HOOK_HOLD_CANCELLED => 'hold-cancelled';
 
@@ -156,13 +155,13 @@ sub new {
     my $cls = shift;
     my $self = bless { @_ }, $cls;
     my $config = $self->{'config'} ||= {};
-    my $conf_file = $self->{'conf_file'};
-    if ($conf_file) {
+    my $config_file = $self->{'config_file'};
+    if ($config_file) {
         %$config = (
             %$config,
-            %{ Biblio::NCIP1::Config->parse($conf_file) },
+            %{ Biblio::NCIP1::Config->parse($config_file) },
         );
-        my $config_dir = $conf_file;
+        my $config_dir = $config_file;
         $config_dir =~ s{/[^/]+$}{};
         while (my ($key, $val) = each %{ $config->{'include'} }) {
             $config->{$key} = Biblio::NCIP1::Config->parse("$config_dir/$val");
@@ -175,8 +174,8 @@ sub new {
 
 sub startup {
     my ($self) = @_;
-    my $conf_file = $self->{'conf_file'};
-    print STDERR "** backend config file: $conf_file\n";
+    my $config_file = $self->{'config_file'};
+    print STDERR "** backend config file: $config_file\n";
 }
 
 sub teardown { }
@@ -186,35 +185,6 @@ sub teardown { }
 sub CreateUser {
     my ($self, $req) = @_;
     fail ERR_UNSUPPORTED_SERVICE;
-    if ($req->{retroactive}) {
-        # XXX What to do?
-    }
-    else {
-        my $user = $req->{user};
-        fail 'error: user already exists' if $self->find_user(%$user);
-        my @cmd = ( CREATE_USER_CMD );
-        push @cmd, (-b => $user->{barcode}) if $user->{barcode};
-        push @cmd, (-f => $user->{first  }) if $user->{first};
-        push @cmd, (-l => $user->{'last' }) if $user->{'last'};
-        push @cmd, (-j => $user->{institution_id}) if $user->{institution_id};
-        push @cmd, (-P => $user->{phone})   if $user->{phone};
-        my $addr = $user->{address};
-        push @cmd, (-1 => $addr->{line1})   if $addr->{line1};
-        push @cmd, (-2 => $addr->{line2})   if $addr->{line2};
-        push @cmd, (-C => $addr->{city})    if $addr->{city};
-        push @cmd, (-S => $addr->{state})   if $addr->{state};
-        push @cmd, (-Z => $addr->{zip})     if $addr->{zip};
-        open my $fh, '-|', @cmd or fail "error: can't create user: $!";
-        my $patron_id;
-        while (<$fh>) {
-            chomp;
-            $patron_id = $_;
-        }
-        close $fh;
-        fail 'error: could not create user' if !defined $patron_id;
-        $user->{id} = $patron_id;
-        return { user => $user };
-    }
 }
 
 sub LookupUser {
@@ -253,8 +223,8 @@ sub RequestItem {
     my $user_barcode = $user->{barcode};
     fail ERR_ELEMENT_RULE_VIOLATED if !defined $user_barcode;
     # Find bibitems (if any)
-    my $library = $req->{recipient};
-    my $bibitems = $self->find_bibitems($library, %{ $req->{item} || $req->{bibitem} || fail ERR_ELEMENT_RULE_VIOLATED });
+    my $agency = $req->{recipient};
+    my $bibitems = $self->find_bibitems($agency, %{ $req->{item} || $req->{bibitem} || fail ERR_ELEMENT_RULE_VIOLATED });
     fail ERR_UNKNOWN_ITEM if !$bibitems || !%$bibitems;
     # We found something
     my %res;
@@ -487,9 +457,9 @@ sub validate_user {
 }
 
 sub find_lendable_holdings_by_bibid {
-    my ($self, $library, $id) = @_;
+    my ($self, $agency, $id) = @_;
     my %loc2bibitem;
-    my $loc_limit_group = $self->library_to_location_limit_group($library);
+    my $loc_limit_group = $self->agency_to_location_limit_group($agency);
     my @holdings = $self->queryn($sql_location_limit_group_and_bibid_to_lendable_holdings, $loc_limit_group, $id);
     foreach (@holdings) {
         my ($bib_id, $location, $barcode, $itemid) = @$_;
@@ -503,9 +473,9 @@ sub find_lendable_holdings_by_bibid {
 }
 
 sub find_lendable_holdings_by_isbn {
-    my ($self, $library, $isbn) = @_;
+    my ($self, $agency, $isbn) = @_;
     my %loc2bibitem;
-    my $loc_limit_group = $self->library_to_location_limit_group($library);
+    my $loc_limit_group = $self->agency_to_location_limit_group($agency);
     my @holdings = $self->queryn($sql_location_limit_group_and_isbn_to_lendable_holdings, $loc_limit_group, isbn13($isbn));
     foreach (@holdings) {
         my ($bib_id, $location, $barcode, $itemid) = @$_;
@@ -518,9 +488,9 @@ sub find_lendable_holdings_by_isbn {
     return \%loc2bibitem;
 }
 
-sub library_to_location_limit_group {
-    my ($self, $library) = @_;
-    return 'VC' if !defined $library;
+sub agency_to_location_limit_group {
+    my ($self, $agency) = @_;
+    return 'VC' if !defined $agency;
     return $self->{config}{libraries}{$library}{limit_group} || 'VC';
 }
 
@@ -543,7 +513,7 @@ sub find_item {
 }
 
 sub find_bibitems {
-    my ($self, $library, %bibitem) = @_;
+    my ($self, $agency, %bibitem) = @_;
     my ($id, $barcode, $isbn, $type) = delete @bibitem{qw(id barcode isbn type)};
     # Fill out bib and item information using data from the Voyager database
     my @bibitems;
@@ -556,11 +526,11 @@ sub find_bibitems {
         };
     }
     if (defined $id && $type eq REQ_BIBITEM_IS_BIB) {
-        my $loc2bibitem = $self->find_lendable_holdings_by_bibid($library, $id);
+        my $loc2bibitem = $self->find_lendable_holdings_by_bibid($agency, $id);
         return $loc2bibitem if $loc2bibitem;
     }
     if (defined $isbn) {
-        my $loc2bibitem = $self->find_lendable_holdings_by_isbn($library, $isbn);
+        my $loc2bibitem = $self->find_lendable_holdings_by_isbn($agency, $isbn);
         return $loc2bibitem;
     }
     return;
@@ -610,10 +580,10 @@ sub sip {
 
 sub item_home {
     my ($self, $item_barcode) = @_;
-    my $query_lib = $self->{query_lib};
     my ($loc) = $self->query1($sql_item_home_circ_location, $item_barcode);
     return $loc;
 }
+
 sub dbh {
     my ($self) = @_;
     return $dbh ||= Biblio::Vger::DBI->connect(
