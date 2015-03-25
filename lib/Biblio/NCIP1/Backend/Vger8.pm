@@ -150,6 +150,43 @@ my $sql_location_limit_group_and_isbn_to_lendable_holdings = q{
     AND    ll.limit_code = ?
     AND    bi.normal_heading = ?
 };
+my $sql_bibid_to_lendable_holdings = q{
+    SELECT bm.bib_id, l.location_code, ib.item_barcode, ib.item_id
+    FROM   bib_mfhd bm,
+           mfhd_master mm,
+           location l,
+           mfhd_item mi,
+           item_status s,
+           item_barcode ib
+    WHERE  bm.mfhd_id = mm.mfhd_id
+    AND    mm.location_id = l.location_id
+    AND    bm.mfhd_id = mi.mfhd_id
+    AND    mi.item_id = s.item_id
+    AND    mi.item_id = ib.item_id
+    AND    s.item_status in ( 1, 11 )
+    AND    ll.limit_code = ?
+    AND    bm.bib_id = ?
+};
+my $sql_isbn_to_lendable_holdings = q{
+    SELECT bi.bib_id, l.location_code, ib.item_barcode, ib.item_id
+    FROM   bib_index bi,
+           bib_mfhd bm,
+           mfhd_master mm,
+           location l,
+           mfhd_item mi,
+           item_status s,
+           item_barcode ib
+    WHERE  bi.bib_id = bm.bib_id
+    AND    bm.mfhd_id = mm.mfhd_id
+    AND    mm.location_id = l.location_id
+    AND    bm.mfhd_id = mi.mfhd_id
+    AND    mi.item_id = s.item_id
+    AND    mi.item_id = ib.item_id
+    AND    s.item_status in ( 1, 11 )
+    AND    bi.index_code = 'ISB3'
+    AND    ll.limit_code = ?
+    AND    bi.normal_heading = ?
+};
 
 sub new {
     my $cls = shift;
@@ -448,9 +485,15 @@ sub validate_user {
 
 sub find_lendable_holdings_by_bibid {
     my ($self, $agency, $id) = @_;
-    my %loc2bibitem;
-    my $loc_limit_group = $self->agency_to_location_limit_group($agency);
-    my @holdings = $self->queryn($sql_location_limit_group_and_bibid_to_lendable_holdings, $loc_limit_group, $id);
+    my $config = $self->{'config'} ||= {};
+    my (%loc2bibitem, @holdings);
+    if (bool($self->{'config'}{'use_limit_groups'})) {
+        my $loc_limit_group = $self->agency_to_location_limit_group($agency);
+        @holdings = $self->queryn($sql_location_limit_group_and_bibid_to_lendable_holdings, $loc_limit_group, $id);
+    }
+    else {
+        @holdings = $self->queryn($sql_bibid_to_lendable_holdings, $id);
+    }
     foreach (@holdings) {
         my ($bib_id, $location, $barcode, $itemid) = @$_;
         push @{ $loc2bibitem{$location} ||= [] }, {
@@ -464,9 +507,14 @@ sub find_lendable_holdings_by_bibid {
 
 sub find_lendable_holdings_by_isbn {
     my ($self, $agency, $isbn) = @_;
-    my %loc2bibitem;
-    my $loc_limit_group = $self->agency_to_location_limit_group($agency);
-    my @holdings = $self->queryn($sql_location_limit_group_and_isbn_to_lendable_holdings, $loc_limit_group, isbn13($isbn));
+    my (%loc2bibitem, @holdings);
+    if (bool($self->{'config'}{'use_limit_groups'})) {
+        my $loc_limit_group = $self->agency_to_location_limit_group($agency);
+        @holdings = $self->queryn($sql_location_limit_group_and_isbn_to_lendable_holdings, $loc_limit_group, isbn13($isbn));
+    }
+    else {
+        @holdings = $self->queryn($sql_isbn_to_lendable_holdings, isbn13($isbn));
+    }
     foreach (@holdings) {
         my ($bib_id, $location, $barcode, $itemid) = @$_;
         push @{ $loc2bibitem{$location} ||= [] }, {
@@ -568,6 +616,30 @@ sub sip {
     return $sip;
 }
 
+sub sip_old {
+    my ($self, $loc) = @_;
+    my $sip = $self->{sip};
+    eval {
+        if (defined $sip) {
+            if (defined $loc && $loc ne $sip->{location}) {
+                $sip->disconnect if $sip->is_connected;
+                $sip->{location} = $loc;
+                $sip->connect || die;
+                my %res = $sip->login;
+                die if !$res{ok};
+            }
+        }
+        else {
+            my %config = %{ $self->{config}{sip} };
+            $config{location} = $loc if defined $loc;
+            $sip = $self->{sip} = Biblio::SIP2::Vger8->new(%config);
+            $sip->connect || die;
+            my %res = $sip->login;
+            die if !$res{ok};
+        }
+    };
+    return $sip;
+}
 
 sub item_home {
     my ($self, $item_barcode) = @_;
@@ -637,6 +709,8 @@ sub sipdate2iso8601 {
     $S ||= 0;
     sprintf('%04d-%02d-%02dT%02d:%02d:%02d', $Y, $m, $d, $H, $M, $S);
 }
+
+sub bool { defined($_[0]) && $_[0] =~ /^[yt1]|^on/i }
 
 sub hook_request_created {
     my ($self, %data) = @_;
