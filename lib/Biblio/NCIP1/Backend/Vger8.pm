@@ -164,7 +164,6 @@ my $sql_bibid_to_lendable_holdings = q{
     AND    mi.item_id = s.item_id
     AND    mi.item_id = ib.item_id
     AND    s.item_status in ( 1, 11 )
-    AND    ll.limit_code = ?
     AND    bm.bib_id = ?
 };
 my $sql_isbn_to_lendable_holdings = q{
@@ -184,7 +183,6 @@ my $sql_isbn_to_lendable_holdings = q{
     AND    mi.item_id = ib.item_id
     AND    s.item_status in ( 1, 11 )
     AND    bi.index_code = 'ISB3'
-    AND    ll.limit_code = ?
     AND    bi.normal_heading = ?
 };
 
