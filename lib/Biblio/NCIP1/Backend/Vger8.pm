@@ -151,7 +151,7 @@ my $sql_location_limit_group_and_isbn_to_lendable_holdings = q{
     AND    bi.normal_heading = ?
 };
 my $sql_bibid_to_lendable_holdings = q{
-    SELECT bm.bib_id, l.location_code, ib.item_barcode, ib.item_id
+    SELECT DISTINCT bm.bib_id, l.location_code, ib.item_barcode, ib.item_id
     FROM   bib_mfhd bm,
            mfhd_master mm,
            location l,
@@ -167,7 +167,7 @@ my $sql_bibid_to_lendable_holdings = q{
     AND    bm.bib_id = ?
 };
 my $sql_isbn_to_lendable_holdings = q{
-    SELECT bi.bib_id, l.location_code, ib.item_barcode, ib.item_id
+    SELECT DISTINCT bi.bib_id, l.location_code, ib.item_barcode, ib.item_id
     FROM   bib_index bi,
            bib_mfhd bm,
            mfhd_master mm,
