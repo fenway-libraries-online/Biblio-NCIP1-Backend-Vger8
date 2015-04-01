@@ -354,6 +354,8 @@ sub AcceptItem {
     # Use SIP to create bib, MFHD, and item records
     my $bibdesc  = $req->{bibdesc};
     my $title = $bibdesc->{title};
+    utf8::encode($title);
+    $title =~ s/[^\x00-\x7f]+//g;  # XXX Wrong!
     #my $itemdesc = $req->{itemdesc};
     my $reqnum = $req->{request}{id} || fail ERR_ELEMENT_RULE_VIOLATED;
     my $user   = $req->{user};
