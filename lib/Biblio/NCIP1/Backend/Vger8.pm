@@ -710,6 +710,21 @@ sub sipdate2iso8601 {
     sprintf('%04d-%02d-%02dT%02d:%02d:%02d', $Y, $m, $d, $H, $M, $S);
 }
 
+sub future_date {
+    local $_ = shift;
+    s/^\+//;
+    my $s = 0;
+    # We make all sorts of simplifying assumptions here, because the end result
+    # is never going to be off by all that much.  February straddling a
+    # daylight saving change will produce the largest error.
+    $s += 2629800 * $1 if s/^(\d+)m//;  # 30.4375 days/month (ick)
+    $s +=  604800 * $1 if s/^(\d+)w//;
+    $s +=   86400 * $1 if s/^(\d+)d//;
+    $s +=    3600 * $1 if s/^(\d+)h//;
+    my ($S, $M, $H, $d, $m, $Y) = localtime(time + $s);
+    sprintf('%04d-%02d-%02dT%02d:%02d:%02d', $Y+1900, $m+1, $d, $H, $M, $S);
+}
+
 sub bool { defined($_[0]) && $_[0] =~ /^[yt1]|^on/i }
 
 sub hook_request_created {
