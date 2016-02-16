@@ -190,13 +190,13 @@ sub new {
     my $cls = shift;
     my $self = bless { @_ }, $cls;
     my $config = $self->{'config'} ||= {};
-    my $config_file = $self->{'config_file'};
-    if ($config_file) {
+    my $conf_file = $self->{'conf_file'};
+    if ($conf_file) {
         %$config = (
             %$config,
-            %{ Biblio::NCIP1::Config->parse($config_file) },
+            %{ Biblio::NCIP1::Config->parse($conf_file) },
         );
-        my $config_dir = $config_file;
+        my $config_dir = $conf_file;
         $config_dir =~ s{/[^/]+$}{};
         while (my ($key, $val) = each %{ $config->{'include'} }) {
             $config->{$key} = Biblio::NCIP1::Config->parse("$config_dir/$val");
@@ -208,8 +208,8 @@ sub new {
 
 sub startup {
     my ($self) = @_;
-    my $config_file = $self->{'config_file'} || '(undefined)';
-    print STDERR "** backend config file: $config_file\n";
+    my $conf_file = $self->{'conf_file'} || '(undefined)';
+    print STDERR "** backend config file: $conf_file\n";
 }
 
 sub teardown { }
